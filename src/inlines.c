@@ -69,6 +69,10 @@ typedef struct subject{
   bufsize_t backticks[MAXBACKTICKS + 1];
   bool scanned_for_backticks;
   bool no_link_openers;
+
+  int *inline_offsets;
+  int offset_len;
+  int current_offset;
 } subject;
 
 void cmark_set_default_skip_chars(int8_t **skip_chars, bool use_memcpy) {
@@ -102,9 +106,19 @@ static inline cmark_node *make_literal(subject *subj, cmark_node_type t,
   e->type = (uint16_t)t;
   e->as.literal = s;
   e->start_line = e->end_line = subj->line;
+
+  int block_offset = 0;
+
+  if (subj->inline_offsets != NULL && subj->offset_len > subj->current_offset) {
+    block_offset = subj->inline_offsets[subj->current_offset];
+  } else {
+    block_offset = subj->block_offset;
+  }
+
   // columns are 1 based.
-  e->start_column = start_column + 1 + subj->column_offset + subj->block_offset;
-  e->end_column = end_column + 1 + subj->column_offset + subj->block_offset;
+  e->start_column = start_column + 1 + subj->column_offset + block_offset;
+  e->end_column = end_column + 1 + subj->column_offset + block_offset;
+
   return e;
 }
 
@@ -212,6 +226,16 @@ static void subject_from_buf(cmark_mem *mem, int line_number, int block_offset, 
   }
   e->scanned_for_backticks = false;
   e->no_link_openers = true;
+}
+
+static void subject_from_buf_offsets(cmark_mem *mem, int line_number,
+                                     int block_offset, subject *e,
+                                     cmark_chunk *chunk, cmark_map *refmap,
+                                     int *offsets, const int offset_len) {
+  subject_from_buf(mem, line_number, block_offset, e, chunk, refmap);
+  e->inline_offsets = offsets;
+  e->offset_len = offset_len;
+  e->current_offset = 0;
 }
 
 static inline int isbacktick(int c) { return (c == '`'); }
@@ -1617,6 +1641,7 @@ static int parse_inline(cmark_parser *parser, subject *subj, cmark_node *parent,
     } else {
       new_inl = handle_newline(subj);
     }
+    subj->current_offset += 1;
     break;
   case '`':
     new_inl = handle_backticks(subj, options);
@@ -1709,7 +1734,10 @@ void cmark_parse_inlines(cmark_parser *parser,
                          int options) {
   subject subj;
   cmark_chunk content = {parent->content.ptr, parent->content.size, 0};
-  subject_from_buf(parser->mem, parent->start_line, parent->start_column - 1 + parent->internal_offset, &subj, &content, refmap);
+  subject_from_buf_offsets(parser->mem, parent->start_line,
+                           parent->start_column - 1 + parent->internal_offset,
+                           &subj, &content, refmap, parent->sub_inline_offsets,
+                           parent->offsets_len);
   if ((options & CMARK_OPT_PRESERVE_WHITESPACE) == 0)
     cmark_chunk_rtrim(&subj.input);
 
@@ -1724,6 +1752,10 @@ void cmark_parse_inlines(cmark_parser *parser,
   while (subj.last_bracket) {
     pop_bracket(&subj);
   }
+
+  free(subj.inline_offsets);
+  subj.inline_offsets = parent->sub_inline_offsets = NULL;
+  subj.offset_len = parent->offsets_len = 0;
 }
 
 // Parse zero or more space characters, including at most one newline.

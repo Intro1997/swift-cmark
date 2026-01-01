@@ -86,7 +86,10 @@ struct cmark_node {
   cmark_node_internal_flags flags;
   int backtick_count;
 
-  cmark_syntax_extension *extension;
+  cmark_syntax_extension* extension;
+
+  int* sub_inline_offsets;
+  int offsets_len;
 
   /**
    * Used during cmark_render() to cache the most recent non-NULL

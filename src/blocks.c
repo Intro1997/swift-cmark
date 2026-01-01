@@ -54,6 +54,120 @@ static inline cmark_node_type S_type(const cmark_node *node) {
   return (cmark_node_type)node->type;
 }
 
+static inline const char* S_type_str(const cmark_node* node) {
+  cmark_node_type type = S_type(node);
+
+  switch (type) {
+    case CMARK_NODE_DOCUMENT: {
+      return "CMARK_NODE_DOCUMENT";
+      break;
+    }
+    case CMARK_NODE_BLOCK_QUOTE: {
+      return "CMARK_NODE_BLOCK_QUOTE";
+      break;
+    }
+    case CMARK_NODE_LIST: {
+      return "CMARK_NODE_LIST";
+      break;
+    }
+    case CMARK_NODE_ITEM: {
+      return "CMARK_NODE_ITEM";
+      break;
+    }
+    case CMARK_NODE_CODE_BLOCK: {
+      return "CMARK_NODE_CODE_BLOCK";
+      break;
+    }
+    case CMARK_NODE_HTML_BLOCK: {
+      return "CMARK_NODE_HTML_BLOCK";
+      break;
+    }
+    case CMARK_NODE_CUSTOM_BLOCK: {
+      return "CMARK_NODE_CUSTOM_BLOCK";
+      break;
+    }
+    case CMARK_NODE_PARAGRAPH: {
+      return "CMARK_NODE_PARAGRAPH";
+      break;
+    }
+    case CMARK_NODE_HEADING: {
+      return "CMARK_NODE_HEADING";
+      break;
+    }
+    case CMARK_NODE_THEMATIC_BREAK: {
+      return "CMARK_NODE_THEMATIC_BREAK";
+      break;
+    }
+    case CMARK_NODE_FOOTNOTE_DEFINITION: {
+      return "CMARK_NODE_FOOTNOTE_DEFINITION";
+      break;
+    }
+    case CMARK_NODE_TEXT: {
+      return "CMARK_NODE_TEXT";
+      break;
+    }
+    case CMARK_NODE_SOFTBREAK: {
+      return "CMARK_NODE_SOFTBREAK";
+      break;
+    }
+    case CMARK_NODE_LINEBREAK: {
+      return "CMARK_NODE_LINEBREAK";
+      break;
+    }
+    case CMARK_NODE_CODE: {
+      return "CMARK_NODE_CODE";
+      break;
+    }
+    case CMARK_NODE_HTML_INLINE: {
+      return "CMARK_NODE_HTML_INLINE";
+      break;
+    }
+    case CMARK_NODE_CUSTOM_INLINE: {
+      return "CMARK_NODE_CUSTOM_INLINE";
+      break;
+    }
+    case CMARK_NODE_EMPH: {
+      return "CMARK_NODE_EMPH";
+      break;
+    }
+    case CMARK_NODE_STRONG: {
+      return "CMARK_NODE_STRONG";
+      break;
+    }
+    case CMARK_NODE_LINK: {
+      return "CMARK_NODE_LINK";
+      break;
+    }
+    case CMARK_NODE_IMAGE: {
+      return "CMARK_NODE_IMAGE";
+      break;
+    }
+    case CMARK_NODE_FOOTNOTE_REFERENCE: {
+      return "CMARK_NODE_FOOTNOTE_REFERENCE";
+      break;
+    }
+    case CMARK_NODE_ATTRIBUTE: {
+      return "CMARK_NODE_ATTRIBUTE";
+      break;
+    }
+    case CMARK_NODE_NONE: {
+      return "CMARK_NODE_NONE";
+      break;
+    }
+  }
+  // extension
+
+  if (type == 32780) {
+    return "CMARK_NODE_TABLE";
+  } else if (type == 32781) {
+    return "CMARK_NODE_TABLE_ROW";
+  } else if (type == 32782) {
+    return "CMARK_NODE_TABLE_CELL";
+  }
+
+  return "CMARK_NODE_NONE";
+}
+
 static void S_set_last_line_blank(cmark_node *node, bool is_blank) {
   if (is_blank)
     node->flags |= CMARK_NODE__LAST_LINE_BLANK;
@@ -91,7 +205,28 @@ static cmark_node *make_block(cmark_mem *mem, cmark_node_type tag,
   e->start_column = start_column;
   e->end_line = start_line;
 
+  e->sub_inline_offsets = NULL;
+  e->offsets_len = 0;
+
   return e;
+}
+
+static void add_sub_inline_offset(cmark_node *node, cmark_parser *parser) {
+  if (node->sub_inline_offsets == NULL) {
+    node->sub_inline_offsets = (int*)malloc(sizeof(int));
+    node->sub_inline_offsets[0] = parser->offset;
+    node->offsets_len = 1;
+  } else {
+    int *old = node->sub_inline_offsets;
+
+    node->sub_inline_offsets =
+        (int*)malloc(sizeof(int) * (node->offsets_len + 1));
+    memcpy(node->sub_inline_offsets, old, sizeof(int) * (node->offsets_len));
+    node->sub_inline_offsets[node->offsets_len] = parser->offset;
+    node->offsets_len += 1;
+
+    free(old);
+  }
 }
 
 // Create a root document node.
@@ -243,6 +378,8 @@ static void add_line(cmark_node *node, cmark_chunk *ch, cmark_parser *parser) {
   }
   cmark_strbuf_put(&node->content, ch->data + parser->offset,
                    ch->len - parser->offset);
+
+  add_sub_inline_offset(node, parser);
 }
 
 static void remove_trailing_blank_lines(cmark_strbuf *ln) {
@@ -1456,6 +1593,7 @@ static void add_text_to_container(cmark_parser *parser, cmark_node *container,
       }
     } else if (parser->blank && (parser->options & CMARK_OPT_PRESERVE_WHITESPACE) == 0) {
       // ??? do nothing
+      add_sub_inline_offset(container, parser);
     } else if (accepts_lines(S_type(container))) {
       if (S_type(container) == CMARK_NODE_HEADING &&
           container->as.heading.setext == false) {
