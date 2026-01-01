@@ -213,19 +213,19 @@ static cmark_node *make_block(cmark_mem *mem, cmark_node_type tag,
 
 static void add_sub_inline_offset(cmark_node *node, cmark_parser *parser) {
   if (node->sub_inline_offsets == NULL) {
-    node->sub_inline_offsets = (int*)malloc(sizeof(int));
+    node->sub_inline_offsets = (int*)parser->mem->calloc(1, sizeof(int));
     node->sub_inline_offsets[0] = parser->offset;
     node->offsets_len = 1;
   } else {
     int *old = node->sub_inline_offsets;
 
     node->sub_inline_offsets =
-        (int*)malloc(sizeof(int) * (node->offsets_len + 1));
+        (int*)parser->mem->calloc(node->offsets_len + 1, sizeof(int));
     memcpy(node->sub_inline_offsets, old, sizeof(int) * (node->offsets_len));
     node->sub_inline_offsets[node->offsets_len] = parser->offset;
     node->offsets_len += 1;
 
-    free(old);
+    parser->mem->free(old);
   }
 }
 

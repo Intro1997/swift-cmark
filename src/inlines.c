@@ -112,6 +112,7 @@ static inline cmark_node *make_literal(subject *subj, cmark_node_type t,
   if (subj->inline_offsets != NULL && subj->offset_len > subj->current_offset) {
     block_offset = subj->inline_offsets[subj->current_offset];
   } else {
+    // inline node of table cell get in here
     block_offset = subj->block_offset;
   }
 
@@ -1753,7 +1754,7 @@ void cmark_parse_inlines(cmark_parser *parser,
     pop_bracket(&subj);
   }
 
-  free(subj.inline_offsets);
+  parser->mem->free(subj.inline_offsets);
   subj.inline_offsets = parent->sub_inline_offsets = NULL;
   subj.offset_len = parent->offsets_len = 0;
 }
