@@ -847,8 +847,8 @@ static delimiter *S_insert_emph(subject *subj, delimiter *opener,
 
   emph->start_line = opener_inl->start_line;
   emph->end_line = closer_inl->end_line;
-  emph->start_column = opener_inl->start_column;
-  emph->end_column = closer_inl->end_column;
+  emph->start_column = opener_inl->start_column + opener_inl->as.literal.len;
+  emph->end_column = closer_inl->end_column - closer_inl->as.literal.len;
 
   // if opener has 0 characters, remove it and its associated inline
   if (opener_num_chars == 0) {
