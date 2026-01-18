@@ -70,9 +70,17 @@ typedef struct subject{
   bool scanned_for_backticks;
   bool no_link_openers;
 
+  /**
+   * `inline_offsets` is assigned by `cmark_node.sub_inline_offsets`, 
+   * each value of it represents the real offset of inline block, which 
+   * is one child of `cmark_node` inline children.
+   * 
+   * The `current_inline` value used to get current inline child offset in
+   * `inline_offsets`
+   */
   int *inline_offsets;
   int offset_len;
-  int current_offset;
+  int current_inline;
 } subject;
 
 void cmark_set_default_skip_chars(int8_t **skip_chars, bool use_memcpy) {
@@ -109,8 +117,8 @@ static inline cmark_node *make_literal(subject *subj, cmark_node_type t,
 
   int block_offset = 0;
 
-  if (subj->inline_offsets != NULL && subj->offset_len > subj->current_offset) {
-    block_offset = subj->inline_offsets[subj->current_offset];
+  if (subj->inline_offsets != NULL && subj->offset_len > subj->current_inline) {
+    block_offset = subj->inline_offsets[subj->current_inline];
   } else {
     // inline node of table cell get in here
     block_offset = subj->block_offset;
@@ -236,7 +244,7 @@ static void subject_from_buf_offsets(cmark_mem *mem, int line_number,
   subject_from_buf(mem, line_number, block_offset, e, chunk, refmap);
   e->inline_offsets = offsets;
   e->offset_len = offset_len;
-  e->current_offset = 0;
+  e->current_inline = 0;
 }
 
 static inline int isbacktick(int c) { return (c == '`'); }
@@ -1642,7 +1650,7 @@ static int parse_inline(cmark_parser *parser, subject *subj, cmark_node *parent,
     } else {
       new_inl = handle_newline(subj);
     }
-    subj->current_offset += 1;
+    subj->current_inline += 1;
     break;
   case '`':
     new_inl = handle_backticks(subj, options);

@@ -88,6 +88,11 @@ struct cmark_node {
 
   cmark_syntax_extension* extension;
 
+  /**
+   * When parser meets inline block child of a node, save current `parser->offset`
+   * to `sub_inline_offsets`, these offset value will be used in
+   * processing inline block range.
+   */
   int* sub_inline_offsets;
   int offsets_len;
 
