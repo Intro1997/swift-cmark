@@ -853,9 +853,11 @@ static delimiter *S_insert_emph(subject *subj, delimiter *opener,
   }
   cmark_node_insert_after(opener_inl, emph);
 
+  int start_column = opener_inl->prev == NULL ? opener_inl->start_column : opener_inl->prev->end_column + 1;
+
   emph->start_line = opener_inl->start_line;
   emph->end_line = closer_inl->end_line;
-  emph->start_column = opener_inl->start_column + opener_inl->as.literal.len;
+  emph->start_column = start_column + opener_inl->as.literal.len;
   emph->end_column = closer_inl->end_column - closer_inl->as.literal.len;
 
   // if opener has 0 characters, remove it and its associated inline
