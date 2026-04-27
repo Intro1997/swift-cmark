@@ -888,6 +888,11 @@ static cmark_node *handle_backslash(cmark_parser *parser, subject *subj) {
     advance(subj);
     return make_str(subj, subj->pos - 2, subj->pos - 1, cmark_chunk_dup(&subj->input, subj->pos - 1, 1));
   } else if (!is_eof(subj) && skip_line_end(subj)) {
+    // NOTE: If '\' is a linebreak symbol, current source code position
+    // should get into newline.
+    ++subj->line;
+    subj->column_offset = -subj->pos;
+
     return make_linebreak(subj->mem);
   } else {
     return make_str(subj, subj->pos - 1, subj->pos - 1, cmark_chunk_literal("\\"));
@@ -1659,6 +1664,20 @@ static int parse_inline(cmark_parser *parser, subject *subj, cmark_node *parent,
     break;
   case '\\':
     new_inl = handle_backslash(parser, subj);
+    if (new_inl->type == CMARK_NODE_LINEBREAK && parent->last_child != NULL &&
+      parent->last_child->type != CMARK_NODE_NONE &&
+      parent->last_child->type != CMARK_NODE_SOFTBREAK &&
+      parent->last_child->type != CMARK_NODE_LINEBREAK) {
+      // NOTE: As a part of source code, '\' should be included in
+      // position.
+      // For example:
+      // ```md
+      // hello\
+      // world
+      //````
+      // The node `hello` whose end_column should be 6 but not 5.
+      parent->last_child->end_column += 1;
+    }
     break;
   case '&':
     new_inl = handle_entity(subj);
