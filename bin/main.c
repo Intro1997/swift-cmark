@@ -1,38 +1,39 @@
 #include <errno.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "cmark-gfm_config.h"
-#include "cmark-gfm.h"
-#include "node.h"
 #include "cmark-gfm-extension_api.h"
-#include "syntax_extension.h"
+#include "cmark-gfm.h"
+#include "cmark-gfm_config.h"
+#include "node.h"
 #include "parser.h"
 #include "registry.h"
+#include "syntax_extension.h"
 
 #include <cmark-gfm-core-extensions.h>
 
 #if defined(__OpenBSD__)
-#  include <sys/param.h>
-#  if OpenBSD >= 201605
-#    define USE_PLEDGE
-#    include <unistd.h>
-#  endif
+#include <sys/param.h>
+#if OpenBSD >= 201605
+#define USE_PLEDGE
+#include <unistd.h>
+#endif
 #endif
 
 #if defined(__OpenBSD__)
-#  include <sys/param.h>
-#  if OpenBSD >= 201605
-#    define USE_PLEDGE
-#    include <unistd.h>
-#  endif
+#include <sys/param.h>
+#if OpenBSD >= 201605
+#define USE_PLEDGE
+#include <unistd.h>
+#endif
 #endif
 
 #if defined(_WIN32) && !defined(__CYGWIN__)
-#include <io.h>
 #include <fcntl.h>
+#include <io.h>
 #endif
 
 typedef enum {
@@ -44,6 +45,177 @@ typedef enum {
   FORMAT_PLAINTEXT,
   FORMAT_LATEX
 } writer_format;
+
+/**
+ * 直接在控制台打印 cmark_node* 的树状结构
+ * @param root 要打印的根节点指针
+ */
+void cmark_node_print_tree(cmark_node *root) {
+  if (!root) {
+    printf("[Null Node]\n");
+    return;
+  }
+
+  // 创建迭代器
+  cmark_iter *iter = cmark_iter_new(root);
+  if (!iter)
+    return;
+
+  cmark_event_type ev_type;
+  int depth = 0;
+
+  // 深度优先遍历树
+  while ((ev_type = cmark_iter_next(iter)) != CMARK_EVENT_DONE) {
+    cmark_node *node = cmark_iter_get_node(iter);
+    if (!node)
+      continue;
+
+    // 获取节点类型名称 (例如 "document", "paragraph", "text")
+    const char *type_str = cmark_node_get_type_string(node);
+
+    if (ev_type == CMARK_EVENT_ENTER) {
+      // 1. 打印缩进和树枝连线
+      for (int i = 0; i < depth; i++) {
+        if (i == depth - 1) {
+          printf("├── ");
+        } else {
+          printf("│   ");
+        }
+      }
+
+      // 2. 打印当前节点类型
+      printf("%s", type_str);
+
+      // 3. 根据节点类型，打印它包含的关键信息
+      cmark_node_type type = cmark_node_get_type(node);
+
+      // 如果节点带有文本字面量（比如文本内容、行内代码），直接打印出来
+      const char *literal = cmark_node_get_literal(node);
+      if (literal) {
+        printf(": \"%s\"", literal);
+      }
+
+      // 如果是标题，额外打印它的层级 (如 H1, H2...)
+      if (type == CMARK_NODE_HEADING) {
+        printf(" (Level %d)", cmark_node_get_heading_level(node));
+      }
+
+      // 如果是代码块，额外打印它的编程语言标签
+      if (type == CMARK_NODE_CODE_BLOCK) {
+        const char *info = cmark_node_get_fence_info(node);
+        if (info && strlen(info) > 0) {
+          printf(" (Lang: %s)", info);
+        }
+      }
+
+      // 换行，准备打印下一个节点
+      printf("\n");
+
+      // 4. 层级控制：如果该节点有子节点，深度 +1
+      if (cmark_node_first_child(node) != NULL) {
+        depth++;
+      }
+
+    } else if (ev_type == CMARK_EVENT_EXIT) {
+      // 离开节点时：如果该节点有子节点，说明它的子树遍历完毕，深度 -1
+      if (cmark_node_first_child(node) != NULL) {
+        depth--;
+      }
+    }
+  }
+
+  // 释放迭代器
+  cmark_iter_free(iter);
+}
+
+void print_source_code(cmark_node *node, const char *source_code,
+                       int source_code_size) {
+  if (node == NULL || source_code == NULL) {
+    return;
+  }
+
+  int start_line = node->start_line;
+  int start_column = node->start_column;
+  int end_line = node->end_line;
+  int end_column = node->end_column;
+
+  char *segment_code = (char *)malloc(source_code_size);
+
+  char c = *source_code;
+  int current_line = 1;
+  int current_pos = 1;
+  int current_col = 1;
+  int start_pos = 1;
+  int end_pos = 1;
+
+  while (current_pos <= source_code_size) {
+    if (start_line == current_line && start_column == current_col) {
+      start_pos = current_pos;
+    }
+    if (end_line == current_line && end_column == current_col) {
+      end_pos = current_pos;
+      break;
+    }
+    if (c == '\n' || c == '\r') {
+      current_line += 1;
+      current_col = 1;
+    } else {
+      current_col += 1;
+    }
+    current_pos += 1;
+    c = source_code[current_pos - 1];
+  }
+
+  start_pos -= 1;
+  strncpy(segment_code, source_code + start_pos, end_pos - start_pos);
+  printf("%s\n", segment_code);
+  free(segment_code);
+}
+
+cmark_node *get_edit_node(cmark_node *document, char **new_source_code) {
+  if (document == NULL || new_source_code == NULL) {
+    return NULL;
+  }
+
+  // suppose that our test case is:
+  // 1. aaa
+  //    1. bbb
+  //        1. ccc
+  //
+  // and structure is:
+  // document
+  // ├── list
+  // │   ├── item
+  // │   │   ├── paragraph
+  // │   │   │   ├── text: "aaa"
+  // │   │   ├── list
+  // │   │   │   ├── item
+  // │   │   │   │   ├── paragraph
+  // │   │   │   │   │   ├── text: "bbb"
+  // │   │   │   │   ├── list
+  // │   │   │   │   │   ├── item
+  // │   │   │   │   │   │   ├── paragraph
+  // │   │   │   │   │   │   │   ├── text: "ccc"
+
+  cmark_node *aim_node = document->first_child->first_child->first_child->next
+                             ->first_child->first_child;
+  printf("[DEBUG]: aim node (%s) is [%d:%d, %d:%d] %s\n",
+         cmark_node_get_type_string(aim_node), aim_node->start_line,
+         aim_node->start_column, aim_node->end_line, aim_node->end_column,
+         aim_node->as.literal.data);
+
+  printf("[DEBUG]: we suppose to modify source code with '1.bbb\\n'\n");
+
+  return aim_node;
+}
+void replace_test(cmark_node *document, const char *source_code,
+                  int source_code_size) {
+  char *new_code = NULL;
+  cmark_node *aim_node = get_edit_node(document, &new_code);
+
+  cmark_node_print_tree(document);
+  print_source_code(aim_node, source_code, source_code_size);
+}
 
 void print_usage() {
   printf("Usage:   cmark-gfm [FILE*]\n");
@@ -58,18 +230,26 @@ void print_usage() {
   printf("  --smart           Use smart punctuation\n");
   printf("  --validate-utf8   Replace UTF-8 invalid sequences with U+FFFD\n");
   printf("  --github-pre-lang Use GitHub-style <pre lang> for code blocks\n");
-  printf("  --extension, -e EXTENSION_NAME  Specify an extension name to use\n");
-  printf("  --list-extensions               List available extensions and quit\n");
-  printf("  --strikethrough-double-tilde    Only parse strikethrough (if enabled)\n");
+  printf(
+      "  --extension, -e EXTENSION_NAME  Specify an extension name to use\n");
+  printf(
+      "  --list-extensions               List available extensions and quit\n");
+  printf("  --strikethrough-double-tilde    Only parse strikethrough (if "
+         "enabled)\n");
   printf("                                  with two tildes\n");
-  printf("  --table-prefer-style-attributes Use style attributes to align table cells\n"
+  printf("  --table-prefer-style-attributes Use style attributes to align "
+         "table cells\n"
          "                                  instead of align attributes.\n");
-  printf("  --table-spans                   Enable parsing row- and column-span\n"
-         "                                  in tables\n");
-  printf("  --table-rowspan-ditto           Use a double-quote 'ditto mark' to indicate\n"
-         "                                  row span in tables instead of a caret.\n");
-  printf("  --full-info-string              Include remainder of code block info\n"
-         "                                  string in a separate attribute.\n");
+  printf(
+      "  --table-spans                   Enable parsing row- and column-span\n"
+      "                                  in tables\n");
+  printf("  --table-rowspan-ditto           Use a double-quote 'ditto mark' to "
+         "indicate\n"
+         "                                  row span in tables instead of a "
+         "caret.\n");
+  printf(
+      "  --full-info-string              Include remainder of code block info\n"
+      "                                  string in a separate attribute.\n");
   printf("  --help, -h       Print usage information\n");
   printf("  --version        Print version\n");
 }
@@ -82,7 +262,8 @@ static bool print_document(cmark_node *document, writer_format writer,
 
   switch (writer) {
   case FORMAT_HTML:
-    result = cmark_render_html_with_mem(document, options, parser->syntax_extensions, mem);
+    result = cmark_render_html_with_mem(document, options,
+                                        parser->syntax_extensions, mem);
     break;
   case FORMAT_XML:
     result = cmark_render_xml_with_mem(document, options, mem);
@@ -113,12 +294,12 @@ static void print_extensions(void) {
   cmark_llist *syntax_extensions;
   cmark_llist *tmp;
 
-  printf ("Available extensions:\nfootnotes\n");
+  printf("Available extensions:\nfootnotes\n");
 
   cmark_mem *mem = cmark_get_default_mem_allocator();
   syntax_extensions = cmark_list_syntax_extensions(mem);
-  for (tmp = syntax_extensions; tmp; tmp=tmp->next) {
-    cmark_syntax_extension *ext = (cmark_syntax_extension *) tmp->data;
+  for (tmp = syntax_extensions; tmp; tmp = tmp->next) {
+    cmark_syntax_extension *ext = (cmark_syntax_extension *)tmp->data;
     printf("%s\n", ext->name);
   }
 
@@ -164,7 +345,8 @@ int main(int argc, char *argv[]) {
   for (i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--version") == 0) {
       printf("cmark-gfm %s", CMARK_GFM_VERSION_STRING);
-      printf(" - CommonMark with GitHub Flavored Markdown converter\n(C) 2014-2016 John MacFarlane\n");
+      printf(" - CommonMark with GitHub Flavored Markdown converter\n(C) "
+             "2014-2016 John MacFarlane\n");
       goto success;
     } else if (strcmp(argv[i], "--list-extensions") == 0) {
       print_extensions();
@@ -235,9 +417,10 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "No argument provided for %s\n", argv[i - 1]);
         goto failure;
       }
-    } else if ((strcmp(argv[i], "-e") == 0) || (strcmp(argv[i], "--extension") == 0)) {
-      i += 1; // Simpler to handle extensions in a second pass, as we can directly register
-              // them with the parser.
+    } else if ((strcmp(argv[i], "-e") == 0) ||
+               (strcmp(argv[i], "--extension") == 0)) {
+      i += 1; // Simpler to handle extensions in a second pass, as we can
+              // directly register them with the parser.
 
       if (i < argc && strcmp(argv[i], "footnotes") == 0) {
         options |= CMARK_OPT_FOOTNOTES;
@@ -263,7 +446,8 @@ int main(int argc, char *argv[]) {
         if (strcmp(argv[i], "footnotes") == 0) {
           continue;
         }
-        cmark_syntax_extension *syntax_extension = cmark_find_syntax_extension(argv[i]);
+        cmark_syntax_extension *syntax_extension =
+            cmark_find_syntax_extension(argv[i]);
         if (!syntax_extension) {
           fprintf(stderr, "Unknown extension %s\n", argv[i]);
           goto failure;
@@ -276,6 +460,9 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  char *source_code = NULL;
+  int source_code_size = 0;
+
   for (i = 0; i < numfps; i++) {
     FILE *fp = fopen(argv[files[i]], "rb");
     if (fp == NULL) {
@@ -285,6 +472,14 @@ int main(int argc, char *argv[]) {
     }
 
     while ((bytes = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
+      if (source_code == NULL) {
+        source_code = (char *)malloc(bytes);
+      } else {
+        source_code = (char *)realloc(source_code, source_code_size + bytes);
+      }
+      strncpy(source_code + source_code_size, buffer, bytes);
+      source_code_size += bytes;
+
       cmark_parser_feed(parser, buffer, bytes);
       if (bytes < sizeof(buffer)) {
         break;
@@ -312,6 +507,8 @@ int main(int argc, char *argv[]) {
 
   document = cmark_parser_finish(parser);
 
+  // replace_test(document, source_code, source_code_size);
+
   if (!document || !print_document(document, writer, options, width, parser))
     goto failure;
 
@@ -322,7 +519,7 @@ failure:
 
 #if DEBUG
   if (parser)
-  cmark_parser_free(parser);
+    cmark_parser_free(parser);
 
   if (document)
     cmark_node_free(document);
